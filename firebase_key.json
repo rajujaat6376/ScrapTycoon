@@ -3,29 +3,24 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from flask import Flask, render_template, request, jsonify
 
-# --- 1. SETUP FLASK & DATABASE ---
 app = Flask(__name__)
 
-# Firebase connect karna
-# Check kar rahe hain ki key file wahan hai ya nahi
+# --- DATABASE CONNECTION ---
+# Render par file check karein
 if os.path.exists('firebase_key.json'):
     cred = credentials.Certificate('firebase_key.json')
     firebase_admin.initialize_app(cred)
     db = firestore.client()
-    print("✅ Database Connected Successfully!")
+    print("✅ Live Database Connected!")
 else:
-    print("⚠️ Error: firebase_key.json nahi mili! Folder check karo.")
+    print("⚠️ Error: Key File Missing!")
 
-# --- 2. GAME PAGES ---
-
-# Home Page (Jab game khulega)
+# --- PAGES ---
 @app.route('/')
 def home():
     return render_template('index.html')
 
-# --- 3. API (LEN-DEN) ---
-
-# Score Save karne ka rasta
+# --- API: SAVE SCORE ---
 @app.route('/api/save_score', methods=['POST'])
 def save_score():
     try:
@@ -33,22 +28,21 @@ def save_score():
         user_id = str(data.get('user_id'))
         new_score = data.get('score')
         
-        # Database mein user dhundo aur update karo
+        # Firestore mein save karein
         user_ref = db.collection('users').document(user_id)
         user_ref.set({
             'score': new_score,
             'last_active': firestore.SERVER_TIMESTAMP
-        }, merge=True) # merge=True ka matlab purana data (UPI id etc) delete mat karna
+        }, merge=True)
         
-        return jsonify({"status": "success", "message": "Score Saved!"})
+        return jsonify({"status": "success", "message": "Saved to Firebase"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
-# Top Players laane ka rasta (Leaderboard)
+# --- API: LEADERBOARD ---
 @app.route('/api/leaderboard', methods=['GET'])
 def get_leaderboard():
     try:
-        # Top 10 users jinka score sabse jyada hai
         users_ref = db.collection('users')
         query = users_ref.order_by('score', direction=firestore.Query.DESCENDING).limit(10)
         results = query.stream()
@@ -57,15 +51,12 @@ def get_leaderboard():
         for doc in results:
             data = doc.to_dict()
             leaderboard.append({
-                "name": data.get('username', 'Unknown'), # Agar naam na ho to Unknown
+                "name": "Player", # Baad mein asli naam lagayenge
                 "score": data.get('score', 0)
             })
-            
         return jsonify(leaderboard)
     except Exception as e:
         return jsonify([])
 
-# --- 4. RUN SERVER ---
 if __name__ == '__main__':
-    # Local mobile par chalane ke liye port 5000
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
