@@ -1,72 +1,63 @@
 import os
-import json
+import firebase_admin
+from firebase_admin import credentials, firestore
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# --- SIMPLE DATABASE (JSON FILE) ---
-DB_FILE = 'local_db.json'
+# --- DATABASE CONNECTION ---
+# Render par file check karein
+if os.path.exists('firebase_key.json'):
+    cred = credentials.Certificate('firebase_key.json')
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    print("✅ Live Database Connected!")
+else:
+    print("⚠️ Error: Key File Missing!")
 
-# Data Load karne ka function
-def load_db():
-    if not os.path.exists(DB_FILE):
-        return {}
-    try:
-        with open(DB_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
-
-# Data Save karne ka function
-def save_db(data):
-    with open(DB_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
-
-# --- GAME PAGES ---
+# --- PAGES ---
 @app.route('/')
 def home():
     return render_template('index.html')
 
-# --- API (LEN-DEN) ---
+# --- API: SAVE SCORE ---
 @app.route('/api/save_score', methods=['POST'])
 def save_score():
     try:
         data = request.json
-        user_id = str(data.get('user_id', 'unknown'))
-        new_score = data.get('score', 0)
+        user_id = str(data.get('user_id'))
+        new_score = data.get('score')
         
-        # Database Load karo
-        db_data = load_db()
+        # Firestore mein save karein
+        user_ref = db.collection('users').document(user_id)
+        user_ref.set({
+            'score': new_score,
+            'last_active': firestore.SERVER_TIMESTAMP
+        }, merge=True)
         
-        # Update karo (Simple Logic)
-        if user_id in db_data:
-            # Sirf tab update karo agar naya score jyada hai
-            if new_score > db_data[user_id]['score']:
-                db_data[user_id]['score'] = new_score
-        else:
-            # New User
-            db_data[user_id] = {'score': new_score}
-            
-        # Save wapas file mein
-        save_db(db_data)
-        
-        return jsonify({"status": "success", "message": "Saved to File!"})
+        return jsonify({"status": "success", "message": "Saved to Firebase"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+# --- API: LEADERBOARD ---
 @app.route('/api/leaderboard', methods=['GET'])
 def get_leaderboard():
-    db_data = load_db()
-    # List banao aur sort karo
-    leaderboard = []
-    for uid, info in db_data.items():
-        leaderboard.append({"name": "Player " + uid[-4:], "score": info['score']})
-    
-    # Sort by score (High to Low)
-    leaderboard = sorted(leaderboard, key=lambda x: x['score'], reverse=True)
-    
-    return jsonify(leaderboard[:10])
+    try:
+        users_ref = db.collection('users')
+        query = users_ref.order_by('score', direction=firestore.Query.DESCENDING).limit(10)
+        results = query.stream()
+        
+        leaderboard = []
+        for doc in results:
+            data = doc.to_dict()
+            leaderboard.append({
+                "name": "Player", # Baad mein asli naam lagayenge
+                "score": data.get('score', 0)
+            })
+        return jsonify(leaderboard)
+    except Exception as e:
+        return jsonify([])
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
-
+    app.run(host='0.0.0.0', port=5000)
+    
